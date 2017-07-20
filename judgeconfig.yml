@@ -1,0 +1,7 @@
+id: Docker
+key: "1234567890"
+problem_storage_root: problems
+runtime:
+  python3: /usr/bin/python3.5
+  gcc: /usr/bin/gcc
+  g++: /usr/bin/g++
