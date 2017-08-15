@@ -9,4 +9,4 @@ class Executor(EmulateTerminalMixin, CompiledExecutor):
     test_program = 'print(readLine()!)'
 
     def get_compile_args(self):
-        return [self.get_command(), self._code]
+        return [self.get_command(), self._code, '-o', self.get_compiled_file()]
