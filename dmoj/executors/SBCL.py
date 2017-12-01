@@ -2,15 +2,20 @@ from dmoj.executors.base_executor import CompiledExecutor
 from dmoj.executors.mixins import ScriptDirectoryMixin, NullStdoutMixin
 
 
+# SBCL implements its own heap management, and relies on ASLR being disabled. So, on startup,
+# it reads /proc/self/exe do determine if ASLR is disabled. If not, it forks, sets
+# personality (http://man7.org/linux/man-pages/man2/personality.2.html) to disable ASLR,
+# then execve's itself...
+# As of https://github.com/DMOJ/judge/issues/277 we set personality ourselves to disable ASLR,
+# so allowing (or blocking) the execve hack is not necessary: SBCL detects that ASLR is disabled,
+# and proceeds to run.
 class Executor(NullStdoutMixin, ScriptDirectoryMixin, CompiledExecutor):
     ext = '.cl'
     name = 'SBCL'
     command = 'sbcl'
-    command_paths = ['sbcl']
-    syscalls = ['personality', 'modify_ldt']
-    fs = ['/etc/nsswitch.conf$', '/etc/passwd$']
+    syscalls = ['personality', 'poll']
     test_program = '(write-line (read-line))'
-    address_grace = 524288 + 131073 * 2 << 8
+    address_grace = 1048576 * 2  # *wipes brow*
 
     compile_script = '''(compile-file "{code}")'''
 
@@ -22,22 +27,3 @@ class Executor(NullStdoutMixin, ScriptDirectoryMixin, CompiledExecutor):
 
     def get_executable(self):
         return self.get_command()
-
-    def get_security(self, *args, **kwargs):
-        from dmoj.cptbox.syscalls import sys_readlink, sys_kill
-        from dmoj.cptbox.handlers import ACCESS_DENIED
-
-        sec = super(Executor, self).get_security(*args, **kwargs)
-        old_readlink = sec[sys_readlink]
-
-        # SBCL does something sketchy where it sets personality to no ASLR, and then re-execves itself.
-        # However, if the read of /proc/self/exe is denied, it will continue execution.
-        # Otherwise, we'd need to allow execve, personality, write on fd=3, poll, and kill.
-        def new_readlink(debugger):
-            if debugger.readstr(debugger.uarg0) == '/proc/self/exe':
-                return ACCESS_DENIED(debugger)
-            return old_readlink(debugger)
-
-        sec[sys_readlink] = new_readlink
-        sec[sys_kill] = lambda debugger: debugger.uarg0 == debugger.pid
-        return sec

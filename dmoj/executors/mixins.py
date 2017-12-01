@@ -1,9 +1,9 @@
 import os
+import sys
 from shutil import copyfile
 
-import sys
-
 from dmoj.judgeenv import env
+from dmoj.utils.unicode import utf8bytes
 
 try:
     if os.name == 'nt':
@@ -50,18 +50,22 @@ try:
 
         BASE_FILESYSTEM = ['/dev/(?:null|tty|zero|u?random)$',
                            '/usr/(?!home)', '/lib(?:32|64)?/', '/opt/',
-                           '/etc/(?:localtime)$']
+                           '/etc/(?:localtime|timezone|nsswitch.conf|resolv.conf|passwd)$',
+                           '/$']
 
         if 'freebsd' in sys.platform:
-            BASE_FILESYSTEM += [r'/etc/s?pwd\.db$']
+            BASE_FILESYSTEM += [r'/etc/s?pwd\.db$', '/dev/hv_tsc$']
         else:
-            BASE_FILESYSTEM += ['/sys/devices/system/cpu(?:$|/online)']
+            BASE_FILESYSTEM += ['/sys/devices/system/cpu(?:$|/online)',
+                                '/etc/selinux/config$']
 
         if sys.platform.startswith('freebsd'):
             BASE_FILESYSTEM += [r'/etc/libmap\.conf$', r'/var/run/ld-elf\.so\.hints$']
         else:
             # Linux and kFreeBSD mounts linux-style procfs.
-            BASE_FILESYSTEM += ['/proc/self/maps$', '/proc/self$', '/proc/(?:meminfo|stat|cpuinfo)$']
+            BASE_FILESYSTEM += ['/proc/self/(?:maps|exe|auxv)$', '/proc/self$',
+                                '/proc/(?:meminfo|stat|cpuinfo|filesystems)$',
+                                '/proc/sys/vm/overcommit_memory$']
 
             # Linux-style ld.
             BASE_FILESYSTEM += [r'/etc/ld\.so\.(?:nohwcap|preload|cache)$']
@@ -69,13 +73,11 @@ try:
 
         class PlatformExecutorMixin(object):
             address_grace = 65536
+            personality = 0x0040000  # ADDR_NO_RANDOMIZE
             fs = []
             syscalls = []
 
-            def get_security(self, launch_kwargs=None):
-                if CHROOTSecurity is None:
-                    raise NotImplementedError('No security manager on Windows')
-                sec = CHROOTSecurity(self.get_fs(), io_redirects=launch_kwargs.get('io_redirects', None))
+            def _add_syscalls(self, sec):
                 for name in self.get_allowed_syscalls():
                     if isinstance(name, tuple) and len(name) == 2:
                         name, handler = name
@@ -83,6 +85,12 @@ try:
                         handler = ALLOW
                     sec[getattr(syscalls, 'sys_' + name)] = handler
                 return sec
+
+            def get_security(self, launch_kwargs=None):
+                if CHROOTSecurity is None:
+                    raise NotImplementedError('No security manager on Windows')
+                sec = CHROOTSecurity(self.get_fs(), io_redirects=launch_kwargs.get('io_redirects', None))
+                return self._add_syscalls(sec)
 
             def get_fs(self):
                 name = self.get_executor_name()
@@ -98,13 +106,15 @@ try:
                 return {'LANG': 'C'}
 
             def launch(self, *args, **kwargs):
-                return SecurePopen(self.get_cmdline() + list(args), executable=self.get_executable(),
+                return SecurePopen([utf8bytes(a) for a in self.get_cmdline() + list(args)],
+                                   executable=utf8bytes(self.get_executable()),
                                    security=self.get_security(launch_kwargs=kwargs),
                                    address_grace=self.get_address_grace(),
+                                   personality=self.personality,
                                    time=kwargs.get('time'), memory=kwargs.get('memory'),
                                    wall_time=kwargs.get('wall_time'),
                                    stderr=(PIPE if kwargs.get('pipe_stderr', False) else None),
-                                   env=self.get_env(), cwd=self._dir, nproc=self.get_nproc(),
+                                   env=self.get_env(), cwd=utf8bytes(self._dir), nproc=self.get_nproc(),
                                    unbuffered=kwargs.get('unbuffered', False))
 except ImportError:
     pass

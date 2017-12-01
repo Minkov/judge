@@ -1,6 +1,11 @@
+from __future__ import print_function
+
 import os
 import sys
 import traceback
+
+import six
+from six import iteritems
 
 import yaml
 
@@ -14,10 +19,10 @@ all_executors = executors.executors
 
 class TestManager(object):
     def output(self, message):
-        print message
+        print(message)
 
     def fail(self, message):
-        self.output(message)
+        self.output('\t\t' + message.replace('\r\n', '\n').replace('\n', '\r\n\t\t'))
         self.failed = True
 
     def set_expected(self, codes_all, codes_cases, feedback_all, feedback_cases):
@@ -112,10 +117,10 @@ class Tester(object):
                 self.case_files += ['test.linux.yml']
 
     def output(self, message=''):
-        print message
+        print(message)
 
     def error_output(self, message):
-        print ansi_style('#ansi[%s](red)') % message
+        print(ansi_style('#ansi[%s](red)') % message)
 
     def test_all(self):
         total_fails = 0
@@ -131,35 +136,38 @@ class Tester(object):
                     self.output(ansi_style('Problem #ansi[%s](cyan|bold) #ansi[failed %d case(s)](red|bold).') %
                                 (problem, fails))
                 else:
-                    print ansi_style('Problem #ansi[%s](cyan|bold) passed with flying colours.') % problem
+                    self.output(ansi_style('Problem #ansi[%s](cyan|bold) passed with flying colours.') % problem)
+                self.output()
                 total_fails += fails
 
         return total_fails
 
     def test_problem(self, problem, test_dir):
         self.output(ansi_style('Testing problem #ansi[%s](cyan|bold)...') % problem)
-        self.output()
         fails = 0
 
-        for case in os.listdir(test_dir):
-            if self.case_regex is not None and not self.case_regex.match(case):
-                continue
+        dirs = [case for case in os.listdir(test_dir) if self.case_regex is None or self.case_regex.match(case)]
+        for i in range(len(dirs)):
+            case = dirs[i]
             case_dir = os.path.join(test_dir, case)
             if os.path.isdir(case_dir):
-                self.output(ansi_style('Running test case #ansi[%s](yellow|bold) for #ansi[%s](cyan|bold)...')
+                self.output(ansi_style('\tRunning test case #ansi[%s](yellow|bold) for #ansi[%s](cyan|bold)...')
                             % (case, problem))
                 try:
                     case_fails = self.run_test_case(problem, case, case_dir)
                 except Exception:
                     fails += 1
-                    self.output(ansi_style('#ansi[Test case failed with exception:](red|bold)'))
+                    self.output(ansi_style('\t#ansi[Test case failed with exception:](red|bold)'))
                     self.output(traceback.format_exc())
                 else:
-                    self.output(ansi_style('Result of case #ansi[%s](yellow|bold) for #ansi[%s](cyan|bold): ')
+                    self.output(ansi_style('\tResult of case #ansi[%s](yellow|bold) for #ansi[%s](cyan|bold): ')
                                 % (case, problem) +
                                 ansi_style(['#ansi[Failed](red|bold)', '#ansi[Success](green|bold)'][not case_fails]))
                     fails += case_fails
-                self.output()
+
+                if i != len(dirs) - 1:
+                    self.output()
+
         return fails
 
     def run_test_case(self, problem, case, case_dir):
@@ -172,20 +180,20 @@ class Tester(object):
                 pass
 
         if not config:
-            self.output(ansi_style('    #ansi[Skipped](magenta|bold) - No usable test.yml'))
+            self.output(ansi_style('\t\t#ansi[Skipped](magenta|bold) - No usable test.yml'))
             return 0
 
         if 'skip' in config and config['skip']:
-            self.output(ansi_style('    #ansi[Skipped](magenta|bold) - Unsupported on current platform'))
+            self.output(ansi_style('\t\t#ansi[Skipped](magenta|bold) - Unsupported on current platform'))
             return 0
 
         language = config['language']
         if language not in all_executors:
-            self.output(ansi_style('    #ansi[Skipped](magenta|bold) - Language not supported'))
+            self.output(ansi_style('\t\t#ansi[Skipped](magenta|bold) - Language not supported'))
             return 0
         time = config['time']
         memory = config['memory']
-        if isinstance(config['source'], (str, unicode)):
+        if isinstance(config['source'], six.string_types):
             with open(os.path.join(case_dir, config['source'])) as f:
                 sources = [f.read()]
         else:
@@ -200,11 +208,14 @@ class Tester(object):
                                                          config.get('feedback_cases', {}),
                                                          self.parse_feedback)
 
+        def output_case(data):
+            self.output('\t\t' + data.strip())
+
         fails = 0
         for source in sources:
             self.sub_id += 1
             self.manager.set_expected(codes_all, codes_cases, feedback_all, feedback_cases)
-            self.judge.begin_grading(self.sub_id, problem, language, source, time, memory, False, False, blocking=True)
+            self.judge.begin_grading(self.sub_id, problem, language, source, time, memory, False, False, blocking=True, report=output_case)
             fails += self.manager.failed
         return fails
 
@@ -213,14 +224,14 @@ class Tester(object):
         if isinstance(cases, list):
             cases = enumerate(cases, 1)
         else:
-            cases = cases.iteritems()
+            cases = iteritems(cases)
         case_expect = {id: func(codes) for id, codes in cases}
         return expect, case_expect
 
     def parse_expected_codes(self, codes):
         if codes == '*':
             return self.all_codes
-        elif isinstance(codes, (str, unicode)):
+        elif isinstance(codes, six.string_types):
             assert codes in self.all_codes
             return {codes}
         else:
@@ -231,7 +242,7 @@ class Tester(object):
     def parse_feedback(self, feedback):
         if feedback is None or feedback == '*':
             return None
-        elif isinstance(feedback, (str, unicode)):
+        elif isinstance(feedback, six.string_types):
             return {feedback}
         else:
             return set(feedback)
@@ -252,12 +263,12 @@ def main():
 
     tester = Tester(judgeenv.problem_regex, judgeenv.case_regex)
     fails = tester.test_all()
-    print
-    print 'Test complete'
+    print()
+    print('Test complete')
     if fails:
-        print ansi_style('#ansi[A total of %d case(s) failed](red|bold).') % fails
+        print(ansi_style('#ansi[A total of %d case(s) failed](red|bold).') % fails)
     else:
-        print ansi_style('#ansi[All cases passed.](green|bold)')
+        print(ansi_style('#ansi[All cases passed.](green|bold)'))
     raise SystemExit(int(fails != 0))
 
 if __name__ == '__main__':

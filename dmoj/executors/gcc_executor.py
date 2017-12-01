@@ -2,8 +2,11 @@ import os
 import re
 from collections import deque
 
+import six
+
 from dmoj.judgeenv import env
 from dmoj.result import Result
+from dmoj.utils.unicode import utf8bytes, utf8text
 from .base_executor import CompiledExecutor
 
 GCC_ENV = env.runtime.gcc_env or {}
@@ -17,7 +20,7 @@ if os.name == 'nt':
 else:
     GCC_COMPILE.update(env.runtime.gcc_compile or {})
 
-recppexc = re.compile(r"terminate called after throwing an instance of \'([A-Za-z0-9_:]+)\'\r?$", re.M)
+recppexc = re.compile(br"terminate called after throwing an instance of \'([A-Za-z0-9_:]+)\'\r?$", re.M)
 
 
 class GCCExecutor(CompiledExecutor):
@@ -33,11 +36,11 @@ class GCCExecutor(CompiledExecutor):
         aux_sources[problem_id + self.ext] = main_source
 
         sources = []
-        for name, source in aux_sources.iteritems():
+        for name, source in aux_sources.items():
             if '.' not in name:
                 name += self.ext
             with open(self._file(name), 'wb') as fo:
-                fo.write(source)
+                fo.write(utf8bytes(source))
             sources.append(name)
         self.sources = sources
         self._fds = fds
@@ -68,8 +71,10 @@ class GCCExecutor(CompiledExecutor):
 
     def get_security(self, launch_kwargs=None):
         from dmoj.cptbox import CHROOTSecurity
-        return CHROOTSecurity(self.get_fs(), writable=self._writable,
-                              io_redirects=launch_kwargs.get('io_redirects', None))
+        return self._add_syscalls(
+            CHROOTSecurity(self.get_fs(), writable=self._writable,
+                           io_redirects=launch_kwargs.get('io_redirects', None))
+        )
 
     def get_env(self):
         return GCC_ENV
@@ -81,7 +86,7 @@ class GCCExecutor(CompiledExecutor):
         if not match:
             return ''
         exception = match[0].group(1)
-        return '' if len(exception) > 40 else exception
+        return '' if len(exception) > 40 else utf8text(exception, 'replace')
 
     @classmethod
     def get_version_flags(cls, command):

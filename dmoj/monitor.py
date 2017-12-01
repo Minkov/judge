@@ -1,7 +1,10 @@
+from __future__ import print_function
+
 import logging
 from contextlib import closing
 from threading import Thread, Event
-from urllib2 import urlopen
+
+from six.moves.urllib.request import urlopen
 
 from dmoj import judgeenv
 from dmoj.judgeenv import startup_warnings, get_problem_roots
@@ -88,7 +91,8 @@ class Monitor(object):
 
     @callback.setter
     def callback(self, callback):
-        self._handler.callback = callback
+        if self._monitor is not None:
+            self._handler.callback = callback
 
     def start(self):
         if self._monitor is not None:
@@ -96,7 +100,7 @@ class Monitor(object):
                 self._monitor.start()
             except OSError:
                 logger.exception('Failed to start problem monitor.')
-                print ansi_style('#ansi[Warning: failed to start problem monitor!](yellow)')
+                print(ansi_style('#ansi[Warning: failed to start problem monitor!](yellow)'))
         if self._refresher is not None:
             self._refresher.start()
 

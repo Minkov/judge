@@ -1,10 +1,16 @@
+from __future__ import print_function
+
 import re
 import sys
 import os
+import logging
 
 from dmoj.cptbox.handlers import ALLOW, STDOUTERR, ACCESS_DENIED
 from dmoj.cptbox._cptbox import bsd_get_proc_cwd, bsd_get_proc_fdno, AT_FDCWD
 from dmoj.cptbox.syscalls import *
+
+
+log = logging.getLogger('dmoj.security')
 
 
 class CHROOTSecurity(dict):
@@ -23,16 +29,26 @@ class CHROOTSecurity(dict):
 
         self.update({
             sys_read: ALLOW,
-            sys_write: STDOUTERR if writable == (1, 2) and not io_redirects else self.do_write,
-            sys_writev: self.do_write,
+            sys_write: ALLOW,
+            sys_writev: ALLOW,
             sys_open: self.do_open,
-            sys_openat: self.do_faccessat,
+            sys_openat: self.do_openat,
             sys_access: self.do_access,
             sys_faccessat: self.do_faccessat,
             # Deny with report
             sys_mkdir: self.deny_with_file_path('mkdir', 0),
+            sys_unlink: self.deny_with_file_path('unlink', 0),
             sys_tgkill: self.do_tgkill,
+            sys_kill: self.do_kill,
             sys_prctl: self.do_prctl,
+
+            sys_statfs: ALLOW,
+            sys_statfs64: ALLOW,
+            sys_getpgrp: ALLOW,
+            sys_restart_syscall: ALLOW,
+            sys_select: ALLOW,
+            sys_newselect: ALLOW,
+            sys_modify_ldt: ALLOW,
 
             sys_getgroups32: ALLOW,
             sys_sched_getaffinity: ALLOW,
@@ -156,13 +172,11 @@ class CHROOTSecurity(dict):
     def deny_with_file_path(self, syscall, argument):
         def check(debugger):
             file = debugger.readstr(getattr(debugger, 'uarg%d' % argument))
-            print>> sys.stderr, '%s: not allowed to access: %s' % (syscall, file)
+            print('%s: not allowed to access: %s' % (syscall, file), file=sys.stderr)
+            log.warning('Denied access via syscall %s: %s', syscall, file)
             return False
 
         return check
-
-    def do_write(self, debugger):
-        return debugger.arg0 in self._writable
 
     def do_access(self, debugger):
         file = debugger.readstr(debugger.uarg0)
@@ -171,48 +185,51 @@ class CHROOTSecurity(dict):
     def do_open(self, debugger):
         file_ptr = debugger.uarg0
         file = debugger.readstr(file_ptr)
+        return self._file_access_check(file, debugger, file_ptr)
 
-        if self._io_redirects:
-            data = self._io_redirects.get(file, None)
+    def _handle_io_redirects(self, file, debugger, file_ptr):
+        data = self._io_redirects.get(file, None)
 
-            if data:
-                user_mode, redirect = data
-                kernel_flags = debugger.uarg1
+        if data:
+            user_mode, redirect = data
+            kernel_flags = debugger.uarg1
 
-                # File is open for read if it is not open for write, unless it's open for both read/write
-                is_valid_read = 'r' in user_mode and (not (kernel_flags & os.O_WRONLY) or kernel_flags & os.O_RDWR)
-                is_valid_write = 'w' in user_mode and (kernel_flags & os.O_WRONLY or kernel_flags & os.O_RDWR) \
-                                 and redirect in self._writable
+            # File is open for read if it is not open for write, unless it's open for both read/write
+            is_valid_read = 'r' in user_mode and (not (kernel_flags & os.O_WRONLY) or kernel_flags & os.O_RDWR)
+            is_valid_write = 'w' in user_mode and (kernel_flags & os.O_WRONLY or kernel_flags & os.O_RDWR) \
+                             and redirect in self._writable
 
-                if is_valid_read or is_valid_write:
-                    # We have to duplicate the handle so that in case a program decides to close it,
-                    # the original will not be closed as well.
-                    # To do this, we can hijack the current open call and replace it with a dup call.
-                    # The structure of a dup call is syscall=sys_dup, arg0=id to dup, so let's set that up.
-                    debugger.syscall = debugger.get_syscall_id(sys_dup)
-                    debugger.uarg0 = redirect
+            if is_valid_read or is_valid_write:
+                # We have to duplicate the handle so that in case a program decides to close it,
+                # the original will not be closed as well.
+                # To do this, we can hijack the current open call and replace it with a dup call.
+                # The structure of a dup call is syscall=sys_dup, arg0=id to dup, so let's set that up.
+                debugger.syscall = debugger.get_syscall_id(sys_dup)
+                debugger.uarg0 = redirect
 
-                    # Once the syscall executes, the result will be our dup'd handle.
-                    def on_return():
-                        handle = debugger.result
-                        self._writable.append(handle)
+                # Once the syscall executes, the result will be our dup'd handle.
+                def on_return():
+                    handle = debugger.result
+                    self._writable.append(handle)
 
-                        # dup overrides the ebx register with the redirect fd, but we should return it back to the
-                        # file pointer in case some program requires it to remain in the register post-syscall.
-                        # The final two args for sys_open (flags & mode) are untouched by sys_dup, so we can leave
-                        # them as-is.
-                        debugger.uarg0 = file_ptr
+                    # dup overrides the ebx register with the redirect fd, but we should return it back to the
+                    # file pointer in case some program requires it to remain in the register post-syscall.
+                    # The final two args for sys_open (flags & mode) are untouched by sys_dup, so we can leave
+                    # them as-is.
+                    debugger.uarg0 = file_ptr
 
-                    debugger.on_return(on_return)
+                debugger.on_return(on_return)
 
+                return True
+
+    def _file_access_check(self, rel_file, debugger, file_ptr=None, dirfd=AT_FDCWD):
+        file = self.get_full_path(debugger, rel_file, dirfd)
+        if file_ptr and self._io_redirects:
+            for path in (rel_file, os.path.basename(file), file):
+                if self._handle_io_redirects(path, debugger, file_ptr):
                     return True
-
-        return self._file_access_check(file, debugger)
-
-    def _file_access_check(self, file, debugger, dirfd=AT_FDCWD):
-        file = self.get_full_path(debugger, file, dirfd)
         if self.fs_jail.match(file) is None:
-            print>> sys.stderr, 'Not allowed to access:', file
+            log.warning('Denied file open: %s', file)
             return False
         return True
 
@@ -225,9 +242,17 @@ class CHROOTSecurity(dict):
         file = '/' + os.path.normpath(file).lstrip('/')
         return file
 
+    def do_openat(self, debugger):
+        file_ptr = debugger.uarg1
+        file = debugger.readstr(file_ptr)
+        return self._file_access_check(file, debugger, file_ptr, dirfd=debugger.arg0)
+
     def do_faccessat(self, debugger):
         file = debugger.readstr(debugger.uarg1)
         return self._file_access_check(file, debugger, dirfd=debugger.arg0)
+
+    def do_kill(self, debugger):
+        return debugger.uarg0 == debugger.pid
 
     def do_tgkill(self, debugger):
         tgid = debugger.uarg0

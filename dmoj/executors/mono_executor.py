@@ -1,4 +1,7 @@
+from __future__ import print_function
+
 import errno
+import logging
 import os
 import re
 import sys
@@ -12,6 +15,8 @@ from .base_executor import CompiledExecutor
 WRITE_FS = ['/proc/self/task/\d+/comm$', '.*?/mono\.\d+$']
 UNLINK_FS = re.compile('.*?/mono.\d+$')
 
+log = logging.getLogger('dmoj.security')
+
 
 class MonoSecurePopen(SecurePopen):
     def _cpu_time_exceeded(self):
@@ -23,7 +28,7 @@ class MonoExecutor(CompiledExecutor):
     nproc = -1  # If you use Mono on Windows you are doing it wrong.
     address_grace = 262144
     cptbox_popen_class = MonoSecurePopen
-    fs = ['/proc/(?:self/|xen)', '/dev/shm', '/proc/stat', 'mono', '/etc/nsswitch.conf$', '/etc/passwd$',
+    fs = ['/proc/(?:self/|xen)', '/dev/shm', '/proc/stat', 'mono',
           '/etc/mono/', '.*/.mono/', '/sys/', '/proc/uptime$', '.*?/mono.\d+$']
 
     def get_compiled_file(self):
@@ -40,10 +45,10 @@ class MonoExecutor(CompiledExecutor):
         sec = CHROOTSecurity(fs, io_redirects=launch_kwargs.get('io_redirects', None))
         sec[sys_sched_getaffinity] = ALLOW
         sec[sys_sched_setscheduler] = ALLOW
-        sec[sys_statfs] = ALLOW
         sec[sys_ftruncate64] = ALLOW
         sec[sys_sched_yield] = ALLOW
         sec[sys_rt_sigsuspend] = ALLOW
+        sec[sys_wait4] = ALLOW
 
         fs = sec.fs_jail
         write_fs = re.compile('|'.join(WRITE_FS))
@@ -53,7 +58,8 @@ class MonoExecutor(CompiledExecutor):
         def handle_open(debugger):
             file = debugger.readstr(debugger.uarg0)
             if fs.match(file) is None:
-                print>>sys.stderr, 'Not allowed to access:', file
+                print('Not allowed to access:', file, file=sys.stderr)
+                log.warning('Denied file open: %s', file)
                 return False
             can = write_fs.match(file) is not None
 
@@ -88,7 +94,8 @@ class MonoExecutor(CompiledExecutor):
         def unlink(debugger):
             path = debugger.readstr(debugger.uarg0)
             if UNLINK_FS.match(path) is None:
-                print 'Not allowed to unlink:', path
+                print('Not allowed to unlink:', path)
+                log.warning('Denied file unlink: %s', path)
                 return False
             return True
 
