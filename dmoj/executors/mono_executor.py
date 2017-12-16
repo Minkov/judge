@@ -1,16 +1,21 @@
+from __future__ import print_function
+
 import errno
+import logging
 import os
 import re
 import sys
 from collections import defaultdict
 
 from dmoj.cptbox import CHROOTSecurity, SecurePopen
-from dmoj.cptbox.handlers import ALLOW, ACCESS_DENIED
+from dmoj.cptbox.handlers import ALLOW, ACCESS_DENIED, ACCESS_ENOENT
 from dmoj.cptbox.syscalls import *
 from .base_executor import CompiledExecutor
 
 WRITE_FS = ['/proc/self/task/\d+/comm$', '.*?/mono\.\d+$']
 UNLINK_FS = re.compile('.*?/mono.\d+$')
+
+log = logging.getLogger('dmoj.security')
 
 
 class MonoSecurePopen(SecurePopen):
@@ -23,7 +28,7 @@ class MonoExecutor(CompiledExecutor):
     nproc = -1  # If you use Mono on Windows you are doing it wrong.
     address_grace = 262144
     cptbox_popen_class = MonoSecurePopen
-    fs = ['/proc/(?:self/|xen)', '/dev/shm', '/proc/stat', 'mono', '/etc/nsswitch.conf$', '/etc/passwd$',
+    fs = ['/proc/(?:self/|xen)', '/dev/shm', '/proc/stat', 'mono',
           '/etc/mono/', '.*/.mono/', '/sys/', '/proc/uptime$', '.*?/mono.\d+$']
 
     def get_compiled_file(self):
@@ -40,10 +45,10 @@ class MonoExecutor(CompiledExecutor):
         sec = CHROOTSecurity(fs, io_redirects=launch_kwargs.get('io_redirects', None))
         sec[sys_sched_getaffinity] = ALLOW
         sec[sys_sched_setscheduler] = ALLOW
-        sec[sys_statfs] = ALLOW
         sec[sys_ftruncate64] = ALLOW
         sec[sys_sched_yield] = ALLOW
         sec[sys_rt_sigsuspend] = ALLOW
+        sec[sys_wait4] = ALLOW
 
         fs = sec.fs_jail
         write_fs = re.compile('|'.join(WRITE_FS))
@@ -53,8 +58,8 @@ class MonoExecutor(CompiledExecutor):
         def handle_open(debugger):
             file = debugger.readstr(debugger.uarg0)
             if fs.match(file) is None:
-                print>>sys.stderr, 'Not allowed to access:', file
-                return False
+                log.info('Denied file open: %s', file)
+                return ACCESS_ENOENT(debugger)
             can = write_fs.match(file) is not None
 
             def update():
@@ -88,8 +93,8 @@ class MonoExecutor(CompiledExecutor):
         def unlink(debugger):
             path = debugger.readstr(debugger.uarg0)
             if UNLINK_FS.match(path) is None:
-                print 'Not allowed to unlink:', path
-                return False
+                log.info('Denied file unlink: %s', path)
+                return ACCESS_ENOENT(debugger)
             return True
 
         sec[sys_open] = sec[sys_shm_open] = handle_open

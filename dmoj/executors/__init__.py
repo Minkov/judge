@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import os
 import re
 import traceback
@@ -10,7 +12,7 @@ _reexecutor = re.compile('([A-Z0-9]+)\.py$')
 # List of executors that exist for historical purposes, but which shouldn't ever be run on a normal system
 # We keep them for compatibility purposes, but they are not important enough to have a commandline flag for enabling
 # them; instead, removing them from this list suffices.
-_unsupported_executors = {'CPP0X'}
+_unsupported_executors = {'CPP0X', 'JAVA7', 'BASH'}
 
 executors = {}
 
@@ -32,17 +34,18 @@ def load_executor(name):
     try:
         return import_module('%s.%s' % (__name__, name))
     except ImportError as e:
-        if e.message not in ('No module named _cptbox',
-                             'No module named msvcrt',
-                             'No module named _wbox',
-                             'No module named termios'):
+        # Python 2 has no quotes, Python 3 has quotes :|
+        if str(e).replace("'", '') not in ('No module named _cptbox',
+                                           'No module named msvcrt',
+                                           'No module named _wbox',
+                                           'No module named termios'):
             traceback.print_exc()
 
 
 def load_executors():
     to_load = get_available()
 
-    print 'Self-testing executors...'
+    print('Self-testing executors...')
 
     for name in to_load:
         executor = load_executor(name)

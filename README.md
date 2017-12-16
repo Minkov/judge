@@ -1,7 +1,7 @@
-Judge [![Linux Build Status](https://img.shields.io/travis/DMOJ/judge.svg?maxAge=2592000)](https://travis-ci.org/DMOJ/judge) [![Windows Build Status](https://ci.appveyor.com/api/projects/status/wv4e1eujb6wtcbps?svg=true)](https://ci.appveyor.com/project/quantum5/judge) [![Coverage](https://img.shields.io/codecov/c/github/DMOJ/judge.svg)](https://codecov.io/gh/DMOJ/judge) [![Slack](https://slack.dmoj.ca/badge.svg)](https://slack.dmoj.ca)
+DMOJ Judge [![Linux Build Status](https://img.shields.io/travis/DMOJ/judge.svg?logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODguMSAxOTUuNSI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTM2LjQgOTcuOGMwIDEwLTggMTguMi0xOC4yIDE4LjJDOC4yIDExNiAwIDEwOCAwIDk3LjhjMC0xMCA4LjItMTguMiAxOC4yLTE4LjJzMTguMiA4IDE4LjIgMTguMnpNMTQwIDE4Ni40YzUgOC43IDE2LjMgMTEuNyAyNSA2LjcgOC43LTUgMTEuNy0xNi4yIDYuNy0yNS01LTguNi0xNi4yLTExLjYtMjUtNi42LTguNiA1LTExLjYgMTYuMi02LjYgMjV6bTMxLjctMTU5YzUtOC43IDItMTkuOC02LjctMjUtOC43LTUtMjAtMi0yNSA2LjgtNSA4LjctMiAyMCA2LjggMjVzMTkuOCAyIDI1LTYuOHpNMTEwIDQ1LjhjMjcuMiAwIDQ5LjQgMjAuOCA1MS44IDQ3LjRsMjYuMy0uNGMtMS0xOS43LTkuNy0zNy41LTIzLTUwLjYtNyAyLjctMTUgMi40LTIyLTEuNy03LTQtMTEuMy0xMS0xMi40LTE4LjMtNi42LTEuNy0xMy41LTIuNy0yMC42LTIuNy0xMi41IDAtMjQuMyAzLTM0LjcgOEw4OCA1MC43YzYuNy0zIDE0LTUgMjItNXptLTUyIDUyYzAtMTcuNiA4LjgtMzMgMjItNDIuNUw2Ni42IDMyLjdDNTEgNDMuMiAzOS4yIDU5LjIgMzQuNCA3Ny43YzUuNyA0LjggOS41IDEyIDkuNSAyMHMtNCAxNS40LTkuNyAyMGM0LjggMTguOCAxNi41IDM0LjggMzIuMiA0NS4zTDgwIDE0MC4zQzY2LjcgMTMxIDU4IDExNS41IDU4IDk4em01MiA1MmMtNy44IDAtMTUuMi0xLjgtMjItNWwtMTIuNiAyMy40YzEwLjMgNS4yIDIyIDggMzQuNiA4IDcgMCAxNC0xIDIwLjYtMi42IDEtNy41IDUuNS0xNC4zIDEyLjUtMTguMyA3LTQuMiAxNS00LjUgMjItMS44IDEzLjMtMTMgMjItMzEgMjMtNTAuNmwtMjYuMi0uNUMxNTkuNCAxMjkgMTM3LjIgMTUwIDExMCAxNTB6Ii8%2BPC9zdmc%2B)](https://travis-ci.org/DMOJ/judge) [![Windows Build Status](https://ci.appveyor.com/api/projects/status/wv4e1eujb6wtcbps?svg=true)](https://ci.appveyor.com/project/quantum5/judge) [![FreeBSD Build Status](https://img.shields.io/jenkins/s/https/ci.dmoj.ca/job/dmoj-judge-freebsd.svg?logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTQiIGhlaWdodD0iMTQiIHZpZXdCb3g9IjAgMCAyNTYgMjUyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHByZXNlcnZlQXNwZWN0UmF0aW89InhNaWRZTWlkIj48ZyBmaWxsPSJ3aGl0ZSI%2BPHBhdGggZD0iTTI1Mi43MjMgNS4xMWMxMy41MDggMTMuNS0yMy45MzkgNzIuODQ4LTMwLjI3IDc5LjE4Mi02LjMzIDYuMzIxLTIyLjQwOS41MDUtMzUuOTEtMTMtMTMuNTA4LTEzLjUtMTkuMzI3LTI5LjU4My0xMi45OTYtMzUuOTE0IDYuMzI3LTYuMzMzIDY1LjY3MS00My43NzcgNzkuMTc2LTMwLjI2OU02My4zMDUgMTkuMzk0Yy0yMC42MjItMTEuNy00OS45NjYtMjQuNzE2LTU5LjMtMTUuMzgtOS40NTggOS40NTQgNC4wMzQgMzkuNDU4IDE1Ljg1OCA2MC4xMTdhMTI2LjgxMiAxMjYuODEyIDAgMCAxIDQzLjQ0Mi00NC43MzciLz48cGF0aCBkPSJNMjMyLjEyMyA3OS42MzZjMS44OTkgNi40NCAxLjU1OCAxMS43Ni0xLjUyMiAxNC44MzQtNy4xOTMgNy4xOTYtMjYuNjI0LS40NjQtNDQuMTQtMTcuMTM0YTg5LjM4MyA4OS4zODMgMCAwIDEtMy42MjctMy40MjhjLTYuMzM0LTYuMzM2LTExLjI2Mi0xMy4wOC0xNC40MTQtMTkuMjkxLTYuMTM1LTExLjAwNi03LjY3LTIwLjcyNi0zLjAzMy0yNS4zNjQgMi41MjctMi41MjQgNi41Ny0zLjIxMiAxMS41MDItMi4zMjUgMy4yMTYtMi4wMzQgNy4wMTMtNC4zIDExLjE3Ni02LjYyMS0xNi45MjktOC44My0zNi4xNzYtMTMuODE3LTU2LjU5My0xMy44MTdDNjMuNzUzIDYuNDkgOC44NTQgNjEuMzggOC44NTQgMTI5LjEwNWMwIDY3LjcxMyA1NC45IDEyMi42MSAxMjIuNjE4IDEyMi42MSA2Ny43MiAwIDEyMi42MTYtNTQuODk3IDEyMi42MTYtMTIyLjYxIDAtMjEuODctNS43NC00Mi4zNzctMTUuNzY3LTYwLjE1Ni0yLjE2NyAzLjk1NS00LjI3NCA3LjU3OC02LjE5OCAxMC42ODciLz48L2c%2BPC9zdmc%2B)](https://ci.dmoj.ca/job/dmoj-judge-freebsd/lastBuild/consoleFull) [![Coverage](https://img.shields.io/codecov/c/github/DMOJ/judge.svg)](https://codecov.io/gh/DMOJ/judge) [![Documentation Status](https://readthedocs.org/projects/dmoj/badge/?version=latest)](https://docs.dmoj.ca) [![Slack](https://slack.dmoj.ca/badge.svg)](https://slack.dmoj.ca)
 =====
 
-Python [AGPLv3](https://github.com/DMOJ/judge/blob/master/LICENSE) contest judge backend for the [DMOJ site](http://github.com/DMOJ/site) interface. The judge implements secure grading on both Linux and Windows machines.
+Python [AGPLv3](https://github.com/DMOJ/judge/blob/master/LICENSE) contest judge backend for the [DMOJ site](http://github.com/DMOJ/site) interface. See it in action at [dmoj.ca](https://dmoj.ca/)!
 
 <table>
 <tr>
@@ -11,35 +11,44 @@ Python [AGPLv3](https://github.com/DMOJ/judge/blob/master/LICENSE) contest judge
 </a>
 </td>
 <td>
-A modern online judge and contest platform system, supporting <b>IO-based</b>, <b>interactive</b>, and <b>signature-graded</b> tasks.
+A modern online judge and contest platform system, supporting <b>IO-based</b>, <b>interactive</b>, and <b>signature-graded</b> tasks,
+            with <b>runtime data generators</b> and <b>custom output validators</b>.
 </td>
 </tr>
 </table>
 
-The DMOJ Judge does **not** need a root user to run on Linux machines: it will run just fine under a normal user.
+## Supported Platforms and Runtimes
+
+The judge implements secure grading on Linux, Windows, and FreeBSD machines.
+
+|           | Linux 	| Windows 	| FreeBSD 	|
+|------	|-------	|---------	|---------	|
+| x64  	| [✔](https://travis-ci.org/DMOJ/judge)     	| [✔](https://ci.appveyor.com/project/quantum5/judge)        | [✔](https://ci.dmoj.ca/job/dmoj-judge-freebsd/)       	|
+| x86  	| ✔     	| ✔      |       ¯\\\_(ツ)\_/¯   |
+| x32 	| ✔     	|    &mdash;	|      &mdash;   	|
+| ARM  	| ✔     	|      &mdash;   	|      ❌   	|
+
+The DMOJ judge does **not** need a root user to run on Linux machines: it will run just fine under a normal user.
 
 Supported languages include:
-* C/++/0x/11/14/
-* Java 7/8
+* C++ 0x/11/14/17 (GCC and Clang)
+* C 99/11
+* Java 7/8/9/10
 * Python 2/3
 * PyPy 2/3
 * Pascal
 * Perl
-* Mono C#
-* Mono F#
-* Mono VB
+* Mono C#/F#/VB
 
-The following languages are also supported, but only on Windows machines:
-* VC 
+The following runtimes are also supported, but only on Windows machines:
+* Visual C++
 * C#
 * F#
 * VB.NET
 
-The Judge can also grade in the languages listed below. These languages are less tested and more likely to be buggy.
+The judge can also grade in the languages listed below. These languages are less tested and more likely to be buggy.
 * Ada
 * AWK
-* Clang
-* Clang++
 * Clozure Common Lisp
 * COBOL
 * D
@@ -60,13 +69,13 @@ The Judge can also grade in the languages listed below. These languages are less
 * PHP 5/7
 * Pike
 * Prolog
-* R
 * Racket
 * Ruby 2.1
 * Rust
 * Scala
-* Scheme
+* Chicken Scheme
 * sed
+* Steel Bank Common Lisp
 * Swift
 * Tcl
 * Turing
@@ -74,13 +83,32 @@ The Judge can also grade in the languages listed below. These languages are less
 * Brain****
 
 ## Installation
+Installing the DMOJ judge creates two executables in your Python's script directory: `dmoj` and `dmoj-cli`.
+`dmoj` is used to connect a judge to a DMOJ site instance, while `dmoj-cli` provides a command-line interface to a
+local judge, useful for testing problems.
+
+For more detailed steps, read the [Linux Installation](https://docs.dmoj.ca/en/latest/judge/linux_installation/) or [Windows Installation](https://docs.dmoj.ca/en/latest/judge/windows_installation/) instructions.
+
+### Stable Build
+[![PyPI version](https://badge.fury.io/py/dmoj.svg)](https://pypi.python.org/pypi/dmoj)
+[![PyPI](https://img.shields.io/pypi/pyversions/dmoj.svg)](https://pypi.python.org/pypi/dmoj)
+
+We periodically publish builds [on PyPI](https://pypi.python.org/pypi/dmoj). This is the easiest way to get started,
+but may not contain all the latest features and improvements.
+
+```
+$ pip install dmoj
+```
+
+### Bleeding-Edge Build
+This is the version of the codebase we run live on [dmoj.ca](https://dmoj.ca).
+
 ```
 $ git clone https://github.com/DMOJ/judge.git
 $ cd judge
-$ python setup.py develop
+$ git submodule update --init --recursive
+$ pip install -e .
 ```
-
-This will create two executables in your Python's script directory: `dmoj` and `dmoj-cli`. `dmoj` is used to connect a judge to a DMOJ site instance, while `dmoj-cli` provides a command-line interface to a local judge, useful for testing problems.
 
 ## Usage
 ### Running a Judge Server
@@ -135,6 +163,5 @@ optional arguments:
   --no-ansi-emu         disable ANSI emulation on Windows
 ```
 
-## More Help
-For info on the problem file format and more, 
-[read the documentation.](https://github.com/DMOJ/docs)
+## Documentation
+For info on the problem file format and more, [read the documentation.](https://docs.dmoj.ca)

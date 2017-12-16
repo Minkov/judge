@@ -1,14 +1,18 @@
 #!/usr/bin/python
+from __future__ import print_function
+
+import codecs
 import errno
 import logging
 import os
 import signal
 import sys
-import codecs
 import threading
 import traceback
 from functools import partial
 from itertools import chain
+
+import six
 
 from dmoj import packet, graders
 from dmoj.config import ConfigNode
@@ -19,9 +23,12 @@ from dmoj.monitor import Monitor, DummyMonitor
 from dmoj.problem import Problem, BatchedTestCase
 from dmoj.result import Result
 from dmoj.utils.ansi import ansi_style, strip_ansi
-from dmoj.utils.debugger import setup_all_debuggers
+from dmoj.utils.unicode import utf8bytes
 
-setup_all_debuggers()
+try:
+    from http.server import HTTPServer
+except ImportError:
+    from BaseHTTPServer import HTTPServer
 
 if os.name == 'posix':
     try:
@@ -57,11 +64,36 @@ class Judge(object):
         self.begin_grading = partial(self.process_submission, TYPE_SUBMISSION, self._begin_grading)
         self.custom_invocation = partial(self.process_submission, TYPE_INVOCATION, self._custom_invocation)
 
+        self.packet_manager = None
+
+        self.updater_exit = False
+        self.updater_signal = threading.Event()
+        self.updater = threading.Thread(target=self._updater_thread)
+
+    def _updater_thread(self):
+        log = logging.getLogger('dmoj.updater')
+        while True:
+            self.updater_signal.wait()
+            self.updater_signal.clear()
+            if self.updater_exit:
+                return
+
+            # Prevent problem updates while grading.
+            # Capture the value so it can't change.
+            thread = self.current_submission_thread
+            if thread:
+                thread.join()
+
+            try:
+                self.packet_manager.supported_problems_packet(get_supported_problems())
+            except Exception:
+                log.exception('Failed to update problems.')
+
     def update_problems(self):
         """
         Pushes current problem set to server.
         """
-        self.packet_manager.supported_problems_packet(get_supported_problems())
+        self.updater_signal.set()
 
     def process_submission(self, type, target, id, *args, **kwargs):
         try:
@@ -70,10 +102,13 @@ class Judge(object):
             pass
         self.process_type = type
         self.current_submission = id
-        self.current_submission_thread = threading.Thread(target=target, args=args)
+
+        is_blocking = kwargs.pop('blocking', False)
+        self.current_submission_thread = threading.Thread(target=target, args=args, kwargs=kwargs)
         self.current_submission_thread.daemon = True
         self.current_submission_thread.start()
-        if kwargs.pop('blocking', False):
+
+        if is_blocking:
             self.current_submission_thread.join()
 
     def _custom_invocation(self, language, source, memory_limit, time_limit, input_data):
@@ -100,22 +135,23 @@ class Judge(object):
                 result = grader.grade(InvocationCase())
             except TerminateGrading:
                 self.packet_manager.submission_terminated_packet()
-                print ansi_style('#ansi[Forcefully terminating invocation.](red|bold)')
+                print(ansi_style('#ansi[Forcefully terminating invocation.](red|bold)'))
                 pass
             except:
                 self.internal_error()
             else:
                 self.packet_manager.invocation_end_packet(result)
 
-        print ansi_style('Done invoking #ansi[%s](green|bold).\n' % (id))
+        print(ansi_style('Done invoking #ansi[%s](green|bold).\n' % (id,)))
         self._terminate_grading = False
         self.current_submission_thread = None
         self.current_submission = None
 
-    def _begin_grading(self, problem_id, language, source, time_limit, memory_limit, short_circuit, pretests_only):
+    def _begin_grading(self, problem_id, language, source, time_limit, memory_limit, short_circuit, pretests_only,
+                       report=print):
         submission_id = self.current_submission
-        print ansi_style('Start grading #ansi[%s](yellow)/#ansi[%s](green|bold) in %s...'
-                         % (problem_id, submission_id, language))
+        report(ansi_style('Start grading #ansi[%s](yellow)/#ansi[%s](green|bold) in %s...'
+                          % (problem_id, submission_id, language)))
 
         try:
             problem = Problem(problem_id, time_limit, memory_limit, load_pretests_only=pretests_only)
@@ -129,7 +165,7 @@ class Judge(object):
         else:
             grader_class = graders.StandardGrader
 
-        grader = self.get_grader_from_source(grader_class, problem, language, source)
+        grader = self.get_grader_from_source(grader_class, problem, language, source, report=report)
         binary = grader.binary if grader else None
 
         # the compiler may have failed, or an error could have happened while initializing a custom judge
@@ -146,7 +182,7 @@ class Judge(object):
                 for result in self.grade_cases(grader, problem.cases, short_circuit=short_circuit):
                     if isinstance(result, BatchBegin):
                         self.packet_manager.batch_begin_packet()
-                        print ansi_style("#ansi[Batch #%d](yellow|bold)" % batch_counter)
+                        report(ansi_style("#ansi[Batch #%d](yellow|bold)" % batch_counter))
                         in_batch = True
                     elif isinstance(result, BatchEnd):
                         self.packet_manager.batch_end_packet()
@@ -157,8 +193,8 @@ class Judge(object):
 
                         # here be cancer
                         is_sc = (result.result_flag & Result.SC)
-                        colored_codes = map(lambda x: '#ansi[%s](%s|bold)' % ('--' if x == 'SC' else x,
-                                                                              Result.COLORS_BYID[x]), codes)
+                        colored_codes = list(map(lambda x: '#ansi[%s](%s|bold)' % ('--' if x == 'SC' else x,
+                                                                                   Result.COLORS_BYID[x]), codes))
                         colored_aux_codes = '{%s}' % ', '.join(colored_codes[1:]) if len(codes) > 1 else ''
                         colored_feedback = '(#ansi[%s](|underline)) ' % result.feedback if result.feedback else ''
                         case_info = '[%.3fs (%.3fs) | %dkb] %s%s' % (result.execution_time,
@@ -167,23 +203,24 @@ class Judge(object):
                                                                      colored_feedback,
                                                                      colored_aux_codes) if not is_sc else ''
                         case_padding = '  ' * in_batch
-                        print ansi_style('%sTest case %2d %-3s %s' % (case_padding, case_number,
-                                                                      colored_codes[0], case_info))
+                        report(ansi_style('%sTest case %2d %-3s %s' % (case_padding, case_number,
+                                                                       colored_codes[0], case_info)))
 
                         self.packet_manager.test_case_status_packet(case_number, result)
 
                         case_number += 1
             except TerminateGrading:
                 self.packet_manager.submission_terminated_packet()
-                print ansi_style('#ansi[Forcefully terminating grading. Temporary files may not be deleted.](red|bold)')
+                report(ansi_style('#ansi[Forcefully terminating grading. '
+                                  'Temporary files may not be deleted.](red|bold)'))
                 pass
             except:
                 self.internal_error()
             else:
                 self.packet_manager.grading_end_packet()
 
-        print ansi_style('Done grading #ansi[%s](yellow)/#ansi[%s](green|bold).' % (problem_id, submission_id))
-        print
+        report(ansi_style('Done grading #ansi[%s](yellow)/#ansi[%s](green|bold).\n' % (problem_id, submission_id)))
+
         self._terminate_grading = False
         self.current_submission_thread = None
         self.current_submission = None
@@ -194,8 +231,10 @@ class Judge(object):
             # Yield notifying objects for batch begin/end, and unwrap all cases inside the batches
             if isinstance(case, BatchedTestCase):
                 yield BatchBegin()
-                for batched_case in self.grade_cases(grader, case.batched_cases, short_circuit=True,
-                                          is_short_circuiting=is_short_circuiting):
+
+                for batched_case in self.grade_cases(grader, case.batched_cases,
+                                                     short_circuit=case.config['short_circuit'],
+                                                     is_short_circuiting=is_short_circuiting):
                     if (batched_case.result_flag & Result.WA) > 0 and not case.points:
                         is_short_circuiting = True
                     yield batched_case
@@ -225,15 +264,12 @@ class Judge(object):
 
             yield result
 
-    def get_grader_from_source(self, grader_class, problem, language, source):
-        if isinstance(source, unicode):
-            source = source.encode('utf-8')
-
+    def get_grader_from_source(self, grader_class, problem, language, source, report=print):
         try:
-            grader = grader_class(self, problem, language, source)
+            grader = grader_class(self, problem, language, utf8bytes(source))
         except CompileError as ce:
-            print ansi_style('#ansi[Failed compiling submission!](red|bold)')
-            print ce.message,  # don't print extra newline
+            report(ansi_style('#ansi[Failed compiling submission!](red|bold)'))
+            report(ce.args[0].rstrip())  # don't print extra newline
             grader = None
         except:  # if custom grader failed to initialize, report it to the site
             return self.internal_error()
@@ -265,7 +301,7 @@ class Judge(object):
         self.packet_manager.internal_error_packet(strip_ansi(message))
 
         # Logs can contain ANSI, and it'll display fine
-        print >> sys.stderr, message
+        print(message, file=sys.stderr)
 
     def terminate_grading(self):
         """
@@ -282,10 +318,8 @@ class Judge(object):
         """
         Attempts to connect to the handler server specified in command line.
         """
+        self.updater.start()
         self.packet_manager.run()
-
-    def __del__(self):
-        del self.packet_manager
 
     def __enter__(self):
         return self
@@ -298,33 +332,37 @@ class Judge(object):
         End any submission currently executing, and exit the judge.
         """
         self.terminate_grading()
+        self.updater_exit = True
+        self.updater_signal.set()
+        if self.packet_manager:
+            self.packet_manager.close()
 
 
 class ClassicJudge(Judge):
-    def __init__(self, host, port):
-        self.packet_manager = packet.PacketManager(host, port, self, env['id'], env['key'])
+    def __init__(self, host, port, **kwargs):
         super(ClassicJudge, self).__init__()
+        self.packet_manager = packet.PacketManager(host, port, self, env['id'], env['key'], **kwargs)
 
 
 def sanity_check():
     # Don't allow starting up without wbox/cptbox, saves cryptic errors later on
     if os.name == 'nt':
         try:
-            import wbox
+            from .wbox import _wbox
         except ImportError:
-            print >> sys.stderr, "wbox must be compiled to grade!"
+            print('wbox must be compiled to grade!', file=sys.stderr)
             return False
 
         # DMOJ needs to be run as admin on Windows
         import ctypes
         if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-            print >> sys.stderr, "can't start, the DMOJ judge must be ran as admin"
+            print("can't start, the DMOJ judge must be ran as admin", file=sys.stderr)
             return False
     else:
         try:
-            import cptbox
+            from .cptbox import _cptbox
         except ImportError:
-            print >> sys.stderr, "cptbox must be compiled to grade!"
+            print('cptbox must be compiled to grade!', file=sys.stderr)
             return False
 
         # However running as root on Linux is a Bad Idea
@@ -335,7 +373,7 @@ def sanity_check():
     # _checker implements standard checker functions in C
     # we fall back to a Python implementation if it's not compiled, but it's slower
     try:
-        from checkers import _checker
+        from .checkers import _checker
     except ImportError:
         startup_warnings.append('native checker module not found, compile _checker for optimal performance')
     return True
@@ -352,9 +390,11 @@ def judge_proc(need_monitor):
         pass
 
     logging.basicConfig(filename=logfile, level=logging.INFO,
-                        format='%(levelname)s %(asctime)s %(module)s %(message)s')
+                        format='%(levelname)s %(asctime)s %(process)d %(module)s %(message)s')
 
-    judge = ClassicJudge(judgeenv.server_host, judgeenv.server_port)
+    judge = ClassicJudge(judgeenv.server_host, judgeenv.server_port,
+                         secure=judgeenv.secure, no_cert_check=judgeenv.no_cert_check,
+                         cert_store=judgeenv.cert_store)
     if need_monitor:
         monitor = Monitor()
         monitor.callback = judge.update_problems
@@ -368,7 +408,6 @@ def judge_proc(need_monitor):
         signal.signal(signal.SIGUSR2, update_problem_signal)
 
     if need_monitor and judgeenv.api_listen:
-        from BaseHTTPServer import HTTPServer
         judge_instance = judge
 
         class Handler(JudgeControlRequestHandler):
@@ -381,20 +420,21 @@ def judge_proc(need_monitor):
     else:
         api_server = None
 
-    print
+    print()
     with monitor, judge:
         try:
             judge.listen()
-        except KeyboardInterrupt:
-            pass
-        except:
+        except Exception:
             traceback.print_exc()
         finally:
             judge.murder()
             if api_server:
                 api_server.shutdown()
 
+
 PR_SET_PDEATHSIG = 1
+
+logpm = logging.getLogger('dmoj.judgepm')
 
 
 class JudgeManager(object):
@@ -415,7 +455,6 @@ class JudgeManager(object):
         self.api_pid = None
 
         self.monitor = Monitor()
-        self.monitor.callback = lambda: os.kill(self.master_pid, signal.SIGUSR2)
 
     def __get_libc(self):
         from ctypes.util import find_library
@@ -424,21 +463,29 @@ class JudgeManager(object):
 
     def _forward_signal(self, sig, respawn=False):
         def handler(signum, frame):
-            print>>sys.stderr, 'judgepm: Received signal (%s), forwarding...' % self.signal_map.get(signum, signum)
-            if not respawn:
-                print>>sys.stderr, 'judgepm: Will no longer respawn judges.'
-                self._try_respawn = False
+            # SIGUSR2, the signal for file updates, may be triggered very quickly.
+            # Due to processing delays, it may cause reentrancy issues when logging.
+            # Band-aid fix is to avoid logging SIGUSR2.
+            if signum not in (signal.SIGUSR2,):
+                logpm.info('Received signal (%s), forwarding...', self.signal_map.get(signum, signum))
+                if not respawn:
+                    logpm.info('Will no longer respawn judges.')
+                    self._try_respawn = False
             self.signal_all(signum)
+
         self.orig_signal[sig] = signal.signal(sig, handler)
 
     def _spawn_child(self, func, *args, **kwargs):
         sys.stdout.flush()
         sys.stderr.flush()
         ppid = os.getpid()
+
+        # Pipe to signal signal handler initialization.
+        pr, pw = os.pipe()
         try:
             pid = os.fork()
         except OSError:
-            print>>sys.stderr, 'judgepm: Failed to spawn judge:', id
+            logpm.exception('Failed to spawn child process.')
             return
         if pid == 0:
             # In child. Scary business.
@@ -447,15 +494,31 @@ class JudgeManager(object):
                 os.kill(os.getpid(), signal.SIGTERM)
                 os._exit(2)
             sys.stdin.close()
+            os.close(pr)
 
-            for sig, handler in self.orig_signal.iteritems():
+            for sig, handler in self.orig_signal.items():
                 signal.signal(sig, handler)
+            os.close(pw)
 
             # How could we possibly return to top level?
             try:
                 os._exit(func(*args, **kwargs) or 0)
             finally:
                 os._exit(1)  # If that os._exit fails because ret is a truthy non-int, then this will ensure death.
+
+        # In parent.
+        os.close(pw)
+
+        # Block until child initializes signals before we register this child to receive signals.
+        while True:
+            try:
+                os.read(pr, 1)
+            except OSError as e:
+                if e.errno != errno.EINTR:
+                    raise
+            else:
+                break
+        os.close(pr)
         return pid
 
     def _judge_proc(self, id):
@@ -473,21 +536,41 @@ class JudgeManager(object):
     def _spawn_judge(self, id):
         pid = self._spawn_child(self._judge_proc, id)
         self.pids[pid] = id
+        logpm.info('Judge %s is pid %d', id, pid)
 
     def _spawn_monitor(self):
         def monitor_proc():
             signal.signal(signal.SIGUSR2, signal.SIG_IGN)
 
+            event = threading.Event()
+            stop = False
+
+            def worker():
+                while True:
+                    event.wait()
+                    event.clear()
+                    if stop:
+                        return
+                    event.wait(1)
+                    if event.is_set():
+                        continue
+                    os.kill(self.master_pid, signal.SIGUSR2)
+
+            threading.Thread(target=worker).start()
+            self.monitor.callback = event.set
             self.monitor.start()
             try:
                 self.monitor.join()
             except KeyboardInterrupt:
                 self.monitor.stop()
+                stop = True
+                event.set()
+
         self.monitor_pid = self._spawn_child(monitor_proc)
+        logpm.info('Monitor is pid %d', self.monitor_pid)
 
     def _spawn_api(self):
         from dmoj import judgeenv
-        from BaseHTTPServer import HTTPServer
 
         master_pid = self.master_pid
 
@@ -500,19 +583,21 @@ class JudgeManager(object):
         def api_proc():
             signal.signal(signal.SIGUSR2, signal.SIG_IGN)
             server.serve_forever()
+
         self.api_pid = self._spawn_child(api_proc)
+        logpm.info('API server is pid %d', self.api_pid)
 
     def _spawn_all(self):
         from dmoj import judgeenv
 
         for id in self.auth:
-            print>>sys.stderr, 'judgepm: Spawning judge:', id
+            logpm.info('Spawning judge: %s', id)
             self._spawn_judge(id)
         if self.monitor.is_real:
-            print>>sys.stderr, 'judgepm: Spawning monitor'
+            logpm.info('Spawning monitor')
             self._spawn_monitor()
         if judgeenv.api_listen is not None:
-            print>>sys.stderr, 'judgepm: Spawning API server'
+            logpm.info('Spawning API server')
             self._spawn_api()
 
     def _monitor(self):
@@ -530,33 +615,37 @@ class JudgeManager(object):
                 judge = self.pids[pid]
                 del self.pids[pid]
                 if self._try_respawn:
-                    print>>sys.stderr, 'judgepm: Judge died, respawning: %s (0x%08X)' % (judge, status)
+                    logpm.warning('Judge died, respawning: %s (pid %d, 0x%08X)', judge, pid, status)
                     self._spawn_judge(judge)
                 else:
-                    print>>sys.stderr, 'judgepm: Judge exited: %s (0x%08X)' % (judge, status)
+                    logpm.info('Judge exited: %s (pid %d, 0x%08X)', judge, pid, status)
             elif pid == self.monitor_pid:
                 if self._try_respawn:
-                    print>>sys.stderr, 'judgepm: Monitor died, respawning (0x%08X)' % status
+                    logpm.warning('Monitor died, respawning (0x%08X)', status)
                     self._spawn_monitor()
                 else:
-                    print>>sys.stderr, 'judgepm: Monitor exited: (0x%08X)' % status
+                    logpm.info('Monitor exited: (0x%08X)', status)
             elif pid == self.api_pid:
                 if self._try_respawn:
-                    print>>sys.stderr, 'judgepm: API server died, respawning (0x%08X)' % status
+                    logpm.warning('API server died, respawning (0x%08X)', status)
                     self._spawn_api()
                 else:
-                    print>>sys.stderr, 'judgepm: API server exited: (0x%08X)' % status
+                    logpm.info('API server exited: (0x%08X)', status)
             else:
-                print>>sys.stderr, 'judgepm: I am not your father, %d (0x%08X)!' % (pid, status)
+                logpm.error('I am not your father, %d (0x%08X)!', pid, status)
+
+    def _respawn_judges(self, signum, frame):
+        logpm.info('Received signal (%s), murderizing all children.', self.signal_map.get(signum, signum))
+        self.signal_all(signal.SIGTERM)
 
     def run(self):
-        print>>sys.stderr, 'judgepm: Starting process manager: %d.' % os.getpid()
+        logpm.info('Starting process manager: %d.', os.getpid())
 
         self._forward_signal(signal.SIGUSR2, respawn=True)
         self._forward_signal(signal.SIGINT)
-        self._forward_signal(signal.SIGHUP)
         self._forward_signal(signal.SIGQUIT)
         self._forward_signal(signal.SIGTERM)
+        signal.signal(signal.SIGHUP, self._respawn_judges)
 
         self._spawn_all()
         try:
@@ -565,7 +654,8 @@ class JudgeManager(object):
             self._try_respawn = False
             self.signal_all(signal.SIGINT)
             self._monitor()
-        print>> sys.stderr, 'judgepm: Exited gracefully: %d.' % os.getpid()
+
+        logpm.info('Exited gracefully: %d.', os.getpid())
 
     def signal_all(self, signum):
         for pid in chain(self.pids, [self.monitor_pid, self.api_pid]):
@@ -576,12 +666,16 @@ class JudgeManager(object):
             except OSError as e:
                 if e.errno != errno.ESRCH:
                     raise
-                # Well the monitor will catch on eventually if the process vanishes.
+                    # Well the monitor will catch on eventually if the process vanishes.
 
 
 def main():  # pragma: no cover
-    sys.stdout = codecs.getwriter("utf-8")(os.fdopen(sys.stdout.fileno(), 'w', 0))
-    sys.stderr = codecs.getwriter("utf-8")(sys.stderr)
+    if six.PY2:
+        sys.stdout = codecs.getwriter('utf-8')(os.fdopen(sys.stdout.fileno(), 'w', 0))
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr)
+    else:
+        sys.stdout = codecs.getwriter('utf-8')(open(sys.stdout.fileno(), 'wb', 0, closefd=False))
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.detach())
 
     if not sanity_check():
         return 1
@@ -600,13 +694,23 @@ def main():  # pragma: no cover
 
     executors.load_executors()
 
-    print 'Running live judge...'
+    if hasattr(signal, 'SIGUSR2'):
+        signal.signal(signal.SIGUSR2, signal.SIG_IGN)
+
+    print('Running live judge...')
 
     for warning in judgeenv.startup_warnings:
-        print ansi_style('#ansi[Warning: %s](yellow)' % warning)
+        print(ansi_style('#ansi[Warning: %s](yellow)' % warning))
     del judgeenv.startup_warnings
 
     if os.name == 'posix' and 'judges' in env:
+        logfile = judgeenv.log_file
+        try:
+            logfile = logfile % 'master'
+        except TypeError:
+            pass
+        logging.basicConfig(filename=logfile, level=logging.INFO,
+                            format='%(levelname)s %(asctime)s %(process)d %(name)s %(message)s')
         if env.pidfile:
             with open(env.pidfile) as f:
                 f.write(str(os.getpid()))
@@ -614,6 +718,7 @@ def main():  # pragma: no cover
         manager.run()
     else:
         return judge_proc(need_monitor=True)
+
 
 if __name__ == '__main__':
     main()
