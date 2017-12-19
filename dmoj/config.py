@@ -67,11 +67,13 @@ class ConfigNode(object):
     def get(self, key, default=None):
         return self[key] or default
 
-    def iteritems(self):
-        if not hasattr(self.raw_config, 'iteritems'):
-            raise InvalidInitException('config node is not a dict')
+    def items(self):
+        return self.iteritems()
 
-        for key, value in self.raw_config.iteritems():
+    def iteritems(self):
+        if not hasattr(self.raw_config, 'items'):
+            raise InvalidInitException('config node is not a dict')
+        for key, value in self.raw_config.items():
             yield key, ConfigNode(value, self, dynamic=self.dynamic) \
                 if isinstance(value, list) or isinstance(value, dict) else value
 
@@ -91,13 +93,13 @@ class ConfigNode(object):
 
                         traceback.print_exc()
                         raise InvalidInitException('exception executing dynamic key ' +
-                                                   str(dynamic_key) + ': ' + e.message)
+                                                   str(dynamic_key) + ': ' + str(e))
                     del self.raw_config[dynamic_key]
                     self.raw_config[item] = cfg
 
                 if item + '++' in self.raw_config:
                     def full(code, local):
-                        exec code in local
+                        exec(code, local)
                         return local['node']
 
                     run_dynamic_key(item + '++', full)

@@ -1,22 +1,29 @@
 import os
 import subprocess
 
+from six import iteritems
+
 from dmoj.executors.java_executor import JavaExecutor
+from dmoj.executors.mixins import EmulateTerminalMixin
+from dmoj.utils.unicode import utf8text
+
+with open(os.path.join(os.path.dirname(__file__), 'scala-security.policy')) as policy_file:
+    policy = policy_file.read()
 
 
-class Executor(JavaExecutor):
+# Must emulate terminal, otherwise `scalac` hangs on a call to `stty`
+class Executor(EmulateTerminalMixin, JavaExecutor):
     name = 'SCALA'
     ext = '.scala'
 
     compiler = 'scalac'
     compiler_time_limit = 20
     vm = 'scala_vm'
+    security_policy = policy
 
     test_program = '''\
-object self_test {
-  def main(args: Array[String]) {
-    println("echo: Hello, World!")
-  }
+object self_test extends App {
+     println("echo: Hello, World!")
 }
 '''
 
@@ -43,7 +50,7 @@ object self_test {
     def autoconfig(cls):
         result = {}
 
-        for key, files in {'scalac': ['scalac'], 'scala': ['scala']}.iteritems():
+        for key, files in iteritems({'scalac': ['scalac'], 'scala': ['scala']}):
             file = cls.find_command_from_list(files)
             if file is None:
                 return result, False, 'Failed to find "%s"' % key
@@ -52,7 +59,8 @@ object self_test {
         scala = result.pop('scala')
         with open(os.devnull, 'w') as devnull:
             process = subprocess.Popen(['bash', '-x', scala, '-version'], stdout=devnull, stderr=subprocess.PIPE)
-        log = [i for i in process.communicate()[1].split('\n') if 'scala.tools.nsc.MainGenericRunner' in i]
+        output = utf8text(process.communicate()[1])
+        log = [i for i in output.split('\n') if 'scala.tools.nsc.MainGenericRunner' in i]
 
         if not log:
             return result, False, 'Failed to parse: %s' % scala
