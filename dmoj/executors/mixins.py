@@ -1,8 +1,11 @@
 import os
+import re
+import shutil
 import sys
 from shutil import copyfile
 
 from dmoj.judgeenv import env
+from dmoj.utils import setbufsize_path
 from dmoj.utils.unicode import utf8bytes
 
 try:
@@ -94,7 +97,9 @@ try:
 
             def get_fs(self):
                 name = self.get_executor_name()
-                return BASE_FILESYSTEM + self.fs + env.get('extra_fs', {}).get(name, [])
+                fs = BASE_FILESYSTEM + self.fs + env.get('extra_fs', {}).get(name, [])
+                fs += [re.escape(self._file('setbufsize.so')) + '$']
+                return fs
 
             def get_allowed_syscalls(self):
                 return self.syscalls
@@ -103,9 +108,21 @@ try:
                 return self.address_grace
 
             def get_env(self):
-                return {'LANG': 'C'}
+                env = {'LANG': 'C'}
+                if self.unbuffered:
+                    env['CPTBOX_STDOUT_BUFFER_SIZE'] = 0
+                return env
 
             def launch(self, *args, **kwargs):
+                agent = self._file('setbufsize.so')
+                shutil.copyfile(setbufsize_path, agent)
+                env = {
+                    'LD_PRELOAD': agent,
+                    'CPTBOX_STDOUT_BUFFER_SIZE': kwargs.get('stdout_buffer_size'),
+                    'CPTBOX_STDERR_BUFFER_SIZE': kwargs.get('stderr_buffer_size'),
+                }
+                env.update(self.get_env())
+
                 return SecurePopen([utf8bytes(a) for a in self.get_cmdline() + list(args)],
                                    executable=utf8bytes(self.get_executable()),
                                    security=self.get_security(launch_kwargs=kwargs),
@@ -114,8 +131,7 @@ try:
                                    time=kwargs.get('time'), memory=kwargs.get('memory'),
                                    wall_time=kwargs.get('wall_time'),
                                    stderr=(PIPE if kwargs.get('pipe_stderr', False) else None),
-                                   env=self.get_env(), cwd=utf8bytes(self._dir), nproc=self.get_nproc(),
-                                   unbuffered=kwargs.get('unbuffered', False))
+                                   env=env, cwd=utf8bytes(self._dir), nproc=self.get_nproc())
 except ImportError:
     pass
 

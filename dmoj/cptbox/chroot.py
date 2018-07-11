@@ -5,10 +5,10 @@ import sys
 import os
 import logging
 
-from dmoj.cptbox.handlers import ALLOW, STDOUTERR, ACCESS_DENIED
+from dmoj.cptbox.handlers import ALLOW, STDOUTERR, ACCESS_DENIED, ACCESS_ENOENT
 from dmoj.cptbox._cptbox import bsd_get_proc_cwd, bsd_get_proc_fdno, AT_FDCWD
 from dmoj.cptbox.syscalls import *
-
+from dmoj.utils.unicode import utf8text
 
 log = logging.getLogger('dmoj.security')
 
@@ -21,8 +21,8 @@ class CHROOTSecurity(dict):
         self._io_redirects = io_redirects
 
         if sys.platform.startswith('freebsd'):
-            self._getcwd_pid = bsd_get_proc_cwd
-            self._getfd_pid = bsd_get_proc_fdno
+            self._getcwd_pid = lambda pid: utf8text(bsd_get_proc_cwd(pid))
+            self._getfd_pid = lambda pid, fd: utf8text(bsd_get_proc_fdno(pid, fd))
         else:
             self._getcwd_pid = lambda pid: os.readlink('/proc/%d/cwd' % pid)
             self._getfd_pid = lambda pid, fd: os.readlink('/proc/%d/fd/%d' % (pid, fd))
@@ -31,13 +31,13 @@ class CHROOTSecurity(dict):
             sys_read: ALLOW,
             sys_write: ALLOW,
             sys_writev: ALLOW,
-            sys_open: self.do_open,
             sys_openat: self.do_openat,
-            sys_access: self.do_access,
             sys_faccessat: self.do_faccessat,
             # Deny with report
-            sys_mkdir: self.deny_with_file_path('mkdir', 0),
-            sys_unlink: self.deny_with_file_path('unlink', 0),
+            sys_open: self.check_file_access('open', 0),
+            sys_access: self.check_file_access('access', 0),
+            sys_mkdir: self.check_file_access('mkdir', 0),
+            sys_unlink: self.check_file_access('unlink', 0),
             sys_tgkill: self.do_tgkill,
             sys_kill: self.do_kill,
             sys_prctl: self.do_prctl,
@@ -149,7 +149,7 @@ class CHROOTSecurity(dict):
                 sys_setcontext: ALLOW,
                 sys_pread: ALLOW,
                 sys_fsync: ALLOW,
-                sys_shm_open: self.do_open,
+                sys_shm_open: self.check_file_access('shm_open', 0),
                 sys_cpuset_getaffinity: ALLOW,
                 sys_thr_new: ALLOW,
                 sys_thr_exit: ALLOW,
@@ -169,23 +169,16 @@ class CHROOTSecurity(dict):
                 sys_ktimer_delete: ALLOW,
             })
 
-    def deny_with_file_path(self, syscall, argument):
+    def check_file_access(self, syscall, argument):
         def check(debugger):
-            file = debugger.readstr(getattr(debugger, 'uarg%d' % argument))
-            print('%s: not allowed to access: %s' % (syscall, file), file=sys.stderr)
-            log.warning('Denied access via syscall %s: %s', syscall, file)
-            return False
+            file_ptr = getattr(debugger, 'uarg%d' % argument)
+            file = debugger.readstr(file_ptr)
+            if self._file_access_check(file, debugger, file_ptr):
+                return True
+            log.info('Denied access via syscall %s: %s', syscall, file)
+            return ACCESS_ENOENT(debugger)
 
         return check
-
-    def do_access(self, debugger):
-        file = debugger.readstr(debugger.uarg0)
-        return self._file_access_check(file, debugger) or ACCESS_DENIED(debugger)
-
-    def do_open(self, debugger):
-        file_ptr = debugger.uarg0
-        file = debugger.readstr(file_ptr)
-        return self._file_access_check(file, debugger, file_ptr)
 
     def _handle_io_redirects(self, file, debugger, file_ptr):
         data = self._io_redirects.get(file, None)
@@ -223,13 +216,16 @@ class CHROOTSecurity(dict):
                 return True
 
     def _file_access_check(self, rel_file, debugger, file_ptr=None, dirfd=AT_FDCWD):
-        file = self.get_full_path(debugger, rel_file, dirfd)
+        try:
+            file = self.get_full_path(debugger, rel_file, dirfd)
+        except UnicodeDecodeError:
+            log.exception('Unicode decoding error while opening relative to %d: %r', dirfd, rel_file)
+            return False
         if file_ptr and self._io_redirects:
             for path in (rel_file, os.path.basename(file), file):
                 if self._handle_io_redirects(path, debugger, file_ptr):
                     return True
         if self.fs_jail.match(file) is None:
-            log.warning('Denied file open: %s', file)
             return False
         return True
 

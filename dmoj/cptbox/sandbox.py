@@ -3,7 +3,6 @@ from __future__ import print_function
 import errno
 import logging
 import os
-import pty
 import re
 import select
 import signal
@@ -140,13 +139,14 @@ class SecurePopen(six.with_metaclass(SecurePopenMeta, Process)):
 
     def __init__(self, debugger, _, args, executable=None, security=None, time=0, memory=0, stdin=PIPE, stdout=PIPE,
                  stderr=None, env=None, nproc=0, address_grace=4096, personality=0, cwd='',
-                 fds=None, unbuffered=False, wall_time=None):
+                 fds=None, wall_time=None):
         self._debugger_type = debugger
         self._syscall_index = index = _SYSCALL_INDICIES[debugger]
         self._executable = executable or _find_exe(args[0])
         self._args = args
         self._chdir = cwd
-        self._env = [utf8bytes('%s=%s' % i) for i in six.iteritems(env if env is not None else os.environ)]
+        self._env = [utf8bytes('%s=%s' % (arg, val))
+                     for arg, val in six.iteritems(env if env is not None else os.environ) if val is not None]
         self._time = time
         self._wall_time = time * 3 if wall_time is None else wall_time
         self._cpu_time = time + 5 if time else 0
@@ -157,7 +157,7 @@ class SecurePopen(six.with_metaclass(SecurePopenMeta, Process)):
         self._nproc = nproc
         self._tle = False
         self._fds = fds
-        self.__init_streams(stdin, stdout, stderr, unbuffered)
+        self.__init_streams(stdin, stdout, stderr)
         self.protection_fault = None
 
         self.debugger._syscall_index = index
@@ -191,6 +191,10 @@ class SecurePopen(six.with_metaclass(SecurePopenMeta, Process)):
 
     def wait(self):
         self._died.wait()
+        if self.returncode == 204 and not self.was_initialized:
+            raise RuntimeError('failed to ptrace child, check Yama config '
+                               '(https://www.kernel.org/doc/Documentation/security/Yama.txt, should be '
+                               'at most 1); if running in Docker, must run container with `--privileged`')
         return self.returncode
 
     def poll(self):
@@ -296,14 +300,11 @@ class SecurePopen(six.with_metaclass(SecurePopenMeta, Process)):
             else:
                 time.sleep(0.01)
 
-    def __init_streams(self, stdin, stdout, stderr, unbuffered):
+    def __init_streams(self, stdin, stdout, stderr):
         self.stdin = self.stdout = self.stderr = None
 
-        if unbuffered:
-            master, slave = pty.openpty()
-
         if stdin is PIPE:
-            self._child_stdin, self._stdin = (os.dup(slave), os.dup(master)) if unbuffered else os.pipe()
+            self._child_stdin, self._stdin = os.pipe()
             self.stdin = os.fdopen(self._stdin, 'w')
         elif isinstance(stdin, int):
             self._child_stdin, self._stdin = stdin, -1
@@ -313,7 +314,7 @@ class SecurePopen(six.with_metaclass(SecurePopenMeta, Process)):
             self._child_stdin = self._stdin = -1
 
         if stdout is PIPE:
-            self._stdout, self._child_stdout = (os.dup(master), os.dup(slave)) if unbuffered else os.pipe()
+            self._stdout, self._child_stdout = os.pipe()
             self.stdout = os.fdopen(self._stdout, 'r')
         elif isinstance(stdout, int):
             self._stdout, self._child_stdout = -1, stdout
@@ -331,10 +332,6 @@ class SecurePopen(six.with_metaclass(SecurePopenMeta, Process)):
             self._stderr, self._child_stderr = -1, stderr.fileno()
         else:
             self._stderr = self._child_stderr = -1
-
-        if unbuffered:
-            os.close(master)
-            os.close(slave)
 
     # All communicate stuff copied from subprocess.
     def communicate(self, input=None):

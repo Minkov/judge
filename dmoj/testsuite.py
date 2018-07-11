@@ -1,13 +1,13 @@
 from __future__ import print_function
 
+import logging
 import os
 import sys
 import traceback
 
 import six
-from six import iteritems
-
 import yaml
+from six import iteritems
 
 from dmoj import judgeenv, executors
 from dmoj.judge import Judge
@@ -89,8 +89,8 @@ class TestManager(object):
 
 class TestJudge(Judge):
     def __init__(self, manager):
-        self.packet_manager = manager
         super(TestJudge, self).__init__()
+        self.packet_manager = manager
 
 
 class Tester(object):
@@ -258,6 +258,9 @@ def main():
             init()
         except ImportError:
             pass
+
+    logging.basicConfig(filename=judgeenv.log_file, level=logging.INFO,
+                        format='%(levelname)s %(asctime)s %(module)s %(message)s')
 
     executors.load_executors()
 

@@ -426,7 +426,7 @@ cdef class Process:
         with nogil:
             if self.process.spawn(pt_child, &config):
                 with gil:
-                    raise RuntimeError('Failed to spawn child')
+                    raise RuntimeError('failed to spawn child')
         free(config.argv)
         free(config.envp)
 

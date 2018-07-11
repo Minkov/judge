@@ -83,18 +83,32 @@ The judge can also grade in the languages listed below. These languages are less
 * Brain****
 
 ## Installation
-On a typical Linux install,
+Installing the DMOJ judge creates two executables in your Python's script directory: `dmoj` and `dmoj-cli`.
+`dmoj` is used to connect a judge to a DMOJ site instance, while `dmoj-cli` provides a command-line interface to a
+local judge, useful for testing problems.
+
+For more detailed steps, read the [Linux Installation](https://docs.dmoj.ca/en/latest/judge/linux_installation/) or [Windows Installation](https://docs.dmoj.ca/en/latest/judge/windows_installation/) instructions.
+
+### Stable Build
+[![PyPI version](https://badge.fury.io/py/dmoj.svg)](https://pypi.python.org/pypi/dmoj)
+[![PyPI](https://img.shields.io/pypi/pyversions/dmoj.svg)](https://pypi.python.org/pypi/dmoj)
+
+We periodically publish builds [on PyPI](https://pypi.python.org/pypi/dmoj). This is the easiest way to get started,
+but may not contain all the latest features and improvements.
+
+```
+$ pip install dmoj
+```
+
+### Bleeding-Edge Build
+This is the version of the codebase we run live on [dmoj.ca](https://dmoj.ca).
 
 ```
 $ git clone https://github.com/DMOJ/judge.git
 $ cd judge
 $ git submodule update --init --recursive
-$ python setup.py develop
+$ pip install -e .
 ```
-
-This will create two executables in your Python's script directory: `dmoj` and `dmoj-cli`. `dmoj` is used to connect a judge to a DMOJ site instance, while `dmoj-cli` provides a command-line interface to a local judge, useful for testing problems.
-
-For more detailed steps, read the [Linux Installation](https://docs.dmoj.ca/en/latest/judge/linux_installation/) or [Windows Installation](https://docs.dmoj.ca/en/latest/judge/windows_installation/) instructions.
 
 ## Usage
 ### Running a Judge Server

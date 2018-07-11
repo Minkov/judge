@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import errno
 import json
 import logging
 import os
@@ -14,6 +15,7 @@ import six
 
 from dmoj import sysinfo
 from dmoj.judgeenv import get_supported_problems, get_runtime_versions
+from dmoj.utils.unicode import utf8text, utf8bytes
 
 try:
     import ssl
@@ -37,6 +39,7 @@ class PacketManager(object):
         self.judge = judge
         self.name = name
         self.key = key
+        self._closed = False
 
         log.info('Preparing to connect to [%s]:%s as: %s', host, port, name)
         if secure and ssl:
@@ -75,7 +78,16 @@ class PacketManager(object):
         versions = get_runtime_versions()
 
         log.info('Opening connection to: [%s]:%s', self.host, self.port)
-        self.conn = socket.create_connection((self.host, self.port), timeout=5)
+
+        while True:
+            try:
+                self.conn = socket.create_connection((self.host, self.port), timeout=5)
+            except OSError as e:
+                if e.errno != errno.EINTR:
+                    raise
+            else:
+                break
+
         self.conn.settimeout(300)
         self.conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
 
@@ -84,8 +96,8 @@ class PacketManager(object):
             self.conn = self.ssl_context.wrap_socket(self.conn, server_hostname=self.host)
 
         log.info('Starting handshake with: [%s]:%s', self.host, self.port)
-        self.input = self.conn.makefile('r')
-        self.output = self.conn.makefile('w', 0)
+        self.input = self.conn.makefile('rb')
+        self.output = self.conn.makefile('wb', 0)
         self.handshake(problems, versions, self.name, self.key)
         log.info('Judge "%s" online: [%s]:%s', self.name, self.host, self.port)
 
@@ -114,7 +126,12 @@ class PacketManager(object):
             self._reconnect()
 
     def __del__(self):
-        self.conn.shutdown(socket.SHUT_RDWR)
+        self.close()
+
+    def close(self):
+        if self.conn and not self._closed:
+            self.conn.shutdown(socket.SHUT_RDWR)
+        self._closed = True
 
     def _read_async(self):
         try:
@@ -137,12 +154,12 @@ class PacketManager(object):
             return self._read_single()
         size = PacketManager.SIZE_PACK.unpack(data)[0]
         try:
-            packet = self.input.read(size).decode('zlib')
+            packet = zlib.decompress(self.input.read(size))
         except zlib.error:
             self._reconnect()
             return self._read_single()
         else:
-            return json.loads(packet)
+            return json.loads(utf8text(packet))
 
     def run(self):
         self._read_async()
@@ -162,7 +179,7 @@ class PacketManager(object):
                 # We cannot use utf8text because it may not be text.
                 packet[k] = v.decode('utf-8', 'replace')
 
-        raw = json.dumps(packet).encode('zlib')
+        raw = zlib.compress(utf8bytes(json.dumps(packet)))
         with self._lock:
             self.output.writelines((PacketManager.SIZE_PACK.pack(len(raw)), raw))
 
@@ -214,7 +231,7 @@ class PacketManager(object):
         try:
             data = self.input.read(PacketManager.SIZE_PACK.size)
             size = PacketManager.SIZE_PACK.unpack(data)[0]
-            packet = self.input.read(size).decode('zlib')
+            packet = utf8text(zlib.decompress(self.input.read(size)))
             resp = json.loads(packet)
         except Exception:
             log.exception('Cannot understand handshake response: [%s]:%s', self.host, self.port)
