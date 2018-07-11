@@ -66,10 +66,20 @@ class build_ext_dmoj(build_ext, object):
             self.compiler.compile_options += ['/Ox', '/W4', '/EHsc', '/GL', '/MT']
             self.compiler.ldflags_shared += ['/OPT:REF,ICF', '/LTCG']
         else:
-            if os.uname()[4].startswith('arm') or os.environ.get('DMOJ_REDIST'):
+            arch = os.uname()[4]
+            is_arm = arch.startswith('arm') or arch.startswith('aarch')
+            target_arch = os.environ.get('DMOJ_TARGET_ARCH')
+            if is_arm or os.environ.get('DMOJ_REDIST'):
                 extra_compile_args = ['-O3']
+                if target_arch:
+                    extra_compile_args.append('-march=%s' % target_arch)
+                elif is_arm:
+                    print('*' * 79)
+                    print('Building on ARM, specify DMOJ_TARGET_ARCH to CPU-specific arch for GCC!')
+                    print('Compiling slower generic build.')
+                    print('*' * 79)
             else:
-                extra_compile_args = ['-march=native', '-O3']
+                extra_compile_args = ['-march=%s' % (target_arch or 'native'), '-O3']
             self.distribution.ext_modules[0].extra_compile_args = extra_compile_args
 
         super(build_ext_dmoj, self).build_extensions()
@@ -83,7 +93,8 @@ class build_ext_dmoj(build_ext, object):
 
 wbox_sources = ['_wbox.pyx', 'handles.cpp', 'process.cpp', 'user.cpp', 'helpers.cpp', 'firewall.cpp']
 cptbox_sources = ['_cptbox.pyx', 'helper.cpp', 'ptdebug.cpp', 'ptdebug_x86.cpp', 'ptdebug_x64.cpp',
-                  'ptdebug_x86_on_x64.cpp', 'ptdebug_x32.cpp', 'ptdebug_arm.cpp', 'ptproc.cpp']
+                  'ptdebug_x86_on_x64.cpp', 'ptdebug_x32.cpp', 'ptdebug_arm.cpp', 'ptdebug_arm64.cpp',
+                  'ptproc.cpp']
 
 if not has_pyx:
     wbox_sources[0] = wbox_sources[0].replace('.pyx', '.cpp')
@@ -126,18 +137,18 @@ if 'sdist' in sys.argv:
         f.write(readme)
 else:
     try:
-        with open(rst_path) as f:
-            readme = f.read()
+        with open(rst_path, 'rb') as f:
+            readme = f.read().replace(b'\r\n', b'\r').replace(b'\r', b'\n')
     except IOError:
         readme = None
 
 setup(
     name='dmoj',
-    version='1.1.0',
+    version='1.2.0',
     packages=find_packages(),
     package_data={
         'dmoj.cptbox': ['syscalls/aliases.list', 'syscalls/*.tbl'],
-        'dmoj.executors': ['csbox.exe', 'java-sandbox.jar', '*.policy'],
+        'dmoj.executors': ['csbox.exe', 'java_sandbox.jar', '*.policy'],
         'dmoj.wbox': ['getaddr*.exe', 'dmsec*.dll'],
     },
     entry_points={
@@ -148,7 +159,7 @@ setup(
         ],
     },
     ext_modules=cythonize(extensions),
-    install_requires=['watchdog', 'pyyaml', 'ansi2html', 'termcolor', 'pygments', 'six'],
+    install_requires=['watchdog', 'pyyaml', 'ansi2html', 'termcolor', 'pygments', 'six', 'setproctitle'],
     tests_require=['mock', 'requests'],
     extras_require={
         'test': ['mock'],

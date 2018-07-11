@@ -1,7 +1,6 @@
 #!/usr/bin/python
 from __future__ import print_function
 
-import codecs
 import errno
 import logging
 import os
@@ -12,18 +11,16 @@ import traceback
 from functools import partial
 from itertools import chain
 
-import six
-
 from dmoj import packet, graders
 from dmoj.config import ConfigNode
 from dmoj.control import JudgeControlRequestHandler
 from dmoj.error import CompileError
-from dmoj.judgeenv import env, get_supported_problems, startup_warnings
+from dmoj.judgeenv import env, get_supported_problems, startup_warnings, clear_problem_dirs_cache
 from dmoj.monitor import Monitor, DummyMonitor
 from dmoj.problem import Problem, BatchedTestCase
 from dmoj.result import Result
 from dmoj.utils.ansi import ansi_style, strip_ansi
-from dmoj.utils.unicode import utf8bytes
+from dmoj.utils.unicode import utf8bytes, unicode_stdout_stderr
 
 try:
     from http.server import HTTPServer
@@ -35,6 +32,12 @@ if os.name == 'posix':
         import readline
     except ImportError:
         pass
+
+
+try:
+    from setproctitle import setproctitle
+except ImportError:
+    setproctitle = lambda x: None
 
 
 class BatchBegin(object):
@@ -85,6 +88,7 @@ class Judge(object):
                 thread.join()
 
             try:
+                clear_problem_dirs_cache()
                 self.packet_manager.supported_problems_packet(get_supported_problems())
             except Exception:
                 log.exception('Failed to update problems.')
@@ -379,6 +383,13 @@ def sanity_check():
     return True
 
 
+def make_host_port(judgeenv):
+    host = judgeenv.server_host
+    if ':' in host:
+        host = '[%s]' % (host,)
+    return '%s:%s%s' % (host, judgeenv.server_port, 's' if judgeenv.secure else '')
+
+
 def judge_proc(need_monitor):
     from dmoj import judgeenv
 
@@ -391,6 +402,8 @@ def judge_proc(need_monitor):
 
     logging.basicConfig(filename=logfile, level=logging.INFO,
                         format='%(levelname)s %(asctime)s %(process)d %(module)s %(message)s')
+
+    setproctitle('DMOJ Judge: %s on %s' % (env['id'], make_host_port(judgeenv)))
 
     judge = ClassicJudge(judgeenv.server_host, judgeenv.server_port,
                          secure=judgeenv.secure, no_cert_check=judgeenv.no_cert_check,
@@ -540,6 +553,7 @@ class JudgeManager(object):
 
     def _spawn_monitor(self):
         def monitor_proc():
+            setproctitle('DMOJ Judge: File monitor')
             signal.signal(signal.SIGUSR2, signal.SIG_IGN)
 
             event = threading.Event()
@@ -581,6 +595,7 @@ class JudgeManager(object):
         server = HTTPServer(judgeenv.api_listen, Handler)
 
         def api_proc():
+            setproctitle('DMOJ Judge: API server')
             signal.signal(signal.SIGUSR2, signal.SIG_IGN)
             server.serve_forever()
 
@@ -641,6 +656,9 @@ class JudgeManager(object):
     def run(self):
         logpm.info('Starting process manager: %d.', os.getpid())
 
+        from dmoj import judgeenv
+        setproctitle('DMOJ Judge: Process manager on %s' % (make_host_port(judgeenv),))
+
         self._forward_signal(signal.SIGUSR2, respawn=True)
         self._forward_signal(signal.SIGINT)
         self._forward_signal(signal.SIGQUIT)
@@ -670,12 +688,7 @@ class JudgeManager(object):
 
 
 def main():  # pragma: no cover
-    if six.PY2:
-        sys.stdout = codecs.getwriter('utf-8')(os.fdopen(sys.stdout.fileno(), 'w', 0))
-        sys.stderr = codecs.getwriter('utf-8')(sys.stderr)
-    else:
-        sys.stdout = codecs.getwriter('utf-8')(open(sys.stdout.fileno(), 'wb', 0, closefd=False))
-        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.detach())
+    unicode_stdout_stderr()
 
     if not sanity_check():
         return 1
